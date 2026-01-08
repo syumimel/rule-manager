@@ -9,7 +9,9 @@ interface Image {
   created_at: string
   rules: {
     name: string
-  } | null
+  } | {
+    name: string
+  }[] | null
 }
 
 interface ImageListProps {
@@ -39,7 +41,7 @@ export default function ImageList({ images }: ImageListProps) {
           <h3 className="font-semibold text-sm mb-1">{image.name}</h3>
           {image.rules && (
             <p className="text-xs text-gray-500 mb-1">
-              ルール: {image.rules.name}
+              ルール: {Array.isArray(image.rules) ? image.rules[0]?.name : image.rules.name}
             </p>
           )}
           <p className="text-xs text-gray-500">

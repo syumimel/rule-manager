@@ -38,7 +38,9 @@ export async function POST(
       return NextResponse.json({ error: '世代が見つかりません' }, { status: 404 })
     }
 
-    if (generation.rules.fortune_teller_id !== user.id) {
+    // rulesは配列として返される可能性があるため、最初の要素を取得
+    const rules = Array.isArray(generation.rules) ? generation.rules[0] : generation.rules
+    if (!rules || rules.fortune_teller_id !== user.id) {
       return NextResponse.json({ error: 'アクセス権限がありません' }, { status: 403 })
     }
 

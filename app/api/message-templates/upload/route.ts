@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { validateMessageTemplate, compileMessageTemplate } from '@/modules/fortune-type/validator'
+import { validateMessageTemplate } from '@/modules/fortune-type/validator'
 import { compileMessageTemplate as compileTemplate } from '@/modules/fortune-type/compiler'
 import { MessageTemplateDefinition } from '@/modules/fortune-type/types'
 import { NextRequest, NextResponse } from 'next/server'
