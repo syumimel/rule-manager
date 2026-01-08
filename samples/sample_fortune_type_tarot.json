@@ -1,0 +1,22 @@
+{
+  "fortune_type_id": "tarot-single",
+  "name": "タロット1枚引き",
+  "description": "78枚のタロットカードから1枚を引く",
+  "category": "タロット",
+  "calculation_function": "supabase/functions/calculate-random",
+  "input_format": {
+    "no_input": "入力不要（乱数生成）"
+  },
+  "output_format": {
+    "result_value": "1-78の数値（カード番号）"
+  },
+  "message_template_id": "tarot-single-template-001",
+  "is_active": true,
+  "metadata": {
+    "author": "admin",
+    "version": "1.0.0"
+  }
+}
+
+
+

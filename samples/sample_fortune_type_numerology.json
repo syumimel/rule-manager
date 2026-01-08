@@ -1,0 +1,22 @@
+{
+  "fortune_type_id": "numerology",
+  "name": "数秘術",
+  "description": "生年月日から数値を計算して運勢を占う",
+  "category": "数秘",
+  "calculation_function": "supabase/functions/calculate-numerology",
+  "input_format": {
+    "birth_date": "YYYYMMDD形式の生年月日"
+  },
+  "output_format": {
+    "result_value": "1-9の数値（ライフパスナンバー）"
+  },
+  "message_template_id": "numerology-template-001",
+  "is_active": true,
+  "metadata": {
+    "author": "admin",
+    "version": "1.0.0"
+  }
+}
+
+
+

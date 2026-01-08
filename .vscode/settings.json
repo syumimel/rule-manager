@@ -1,0 +1,25 @@
+{
+  "editor.fontSize": 12,
+  "editor.fontFamily": "Consolas, 'Courier New', monospace",
+  "editor.lineHeight": 1.5,
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "files.eol": "\n",
+  "files.encoding": "utf8",
+  "[markdown]": {
+    "editor.fontSize": 11,
+    "editor.wordWrap": "on"
+  },
+  "[typescript]": {
+    "editor.fontSize": 12
+  },
+  "[typescriptreact]": {
+    "editor.fontSize": 12
+  },
+  "[javascript]": {
+    "editor.fontSize": 12
+  },
+  "[javascriptreact]": {
+    "editor.fontSize": 12
+  }
+}

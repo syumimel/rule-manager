@@ -1,0 +1,22 @@
+{
+  "fortune_type_id": "simple-fortune",
+  "name": "シンプル運勢",
+  "description": "シンプルな運勢占い（乱数で1-5の結果を返す）",
+  "category": "運勢",
+  "calculation_function": "supabase/functions/calculate-random",
+  "input_format": {
+    "no_input": "入力不要（乱数生成）"
+  },
+  "output_format": {
+    "result_value": "1-5の数値（大吉=1、中吉=2、小吉=3、吉=4、末吉=5）"
+  },
+  "message_template_id": "simple-fortune-template-001",
+  "is_active": true,
+  "metadata": {
+    "author": "admin",
+    "version": "1.0.0"
+  }
+}
+
+
+
