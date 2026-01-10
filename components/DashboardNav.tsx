@@ -26,6 +26,7 @@ export default function DashboardNav({ user }: DashboardNavProps) {
     { href: '/dashboard/images', label: '画像管理' },
     { href: '/dashboard/fortune-types', label: '占いタイプ' },
     { href: '/dashboard/message-templates', label: 'メッセージテンプレート' },
+    { href: '/dashboard/chat', label: 'チャット' },
     { href: '/dashboard/logs', label: 'ログ' },
     { href: '/dashboard/settings', label: '設定' },
   ]

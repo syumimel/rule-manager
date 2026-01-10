@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyLineSignature, LineWebhookRequest } from '@/modules/line/webhook'
 import { executeFortune, sendReplyMessage, getChannelAccessToken } from '@/modules/line/reply'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { logLineInteraction } from '@/modules/log/line'
+import { saveReceivedMessage, saveSentMessage } from '@/lib/chat/message-log'
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,21 +47,131 @@ export async function POST(request: NextRequest) {
 
 async function handleMessageEvent(event: any) {
   const supabase = await createClient()
+  const adminClient = createAdminClient()
   const userId = event.source.userId
   const messageText = event.message?.text || ''
   const replyToken = event.replyToken
+  const messageId = event.message?.id
 
   if (!userId || !replyToken) {
     return
   }
 
-  // ログ記録（受信）
+  // メッセージログに保存（受信）
+  // Webhookは認証なしで実行されるため、adminClientを使用してRLSをバイパス
+  try {
+    // 重複チェック（messageIdがある場合）
+    if (messageId) {
+      const { data: existing } = await adminClient
+        .from('message_logs')
+        .select('id')
+        .eq('message_id', messageId)
+        .limit(1)
+        .single()
+      
+      if (existing) {
+        // 重複メッセージの場合は無視
+        console.log('Duplicate message_id, skipping:', messageId)
+      } else {
+        // メッセージログを保存
+        const { error: insertError } = await adminClient
+          .from('message_logs')
+          .insert({
+            line_user_id: userId,
+            message_type: 'received',
+            message_text: messageText,
+            raw_event_data: event,
+            reply_token: replyToken || null,
+            message_id: messageId || null,
+          })
+        
+        if (insertError) {
+          console.error('Failed to save message log:', insertError)
+        }
+      }
+    } else {
+      // messageIdがない場合は保存を試行
+      const { error: insertError } = await adminClient
+        .from('message_logs')
+        .insert({
+          line_user_id: userId,
+          message_type: 'received',
+          message_text: messageText,
+          raw_event_data: event,
+          reply_token: replyToken || null,
+          message_id: null,
+        })
+      
+      if (insertError) {
+        console.error('Failed to save message log:', insertError)
+      }
+    }
+  } catch (error: any) {
+    console.error('Failed to save message log:', error)
+  }
+
+  // 既存のログ記録（line_interactionsテーブル用）
   await logLineInteraction({
     userId,
     eventType: 'message',
     messageContent: messageText,
     replyContent: null,
   })
+
+  // 占い師IDを取得（LINE設定から、またはデフォルト）
+  const fortuneTellerId = await getFortuneTellerId(adminClient)
+  
+  // オウム返し設定を確認（adminClientを使用してRLSをバイパス）
+  if (fortuneTellerId) {
+    // adminClientを使って直接chat_settingsを確認
+    const { data: chatSettings, error: settingsError } = await adminClient
+      .from('chat_settings')
+      .select('echo_enabled')
+      .eq('fortune_teller_id', fortuneTellerId)
+      .eq('line_user_id', userId)
+      .single()
+    
+    const echoEnabled = chatSettings?.echo_enabled || false
+    
+    if (echoEnabled) {
+      // オウム返しを実行
+      await sendReplyMessage(
+        replyToken,
+        [
+          {
+            type: 'text',
+            text: messageText,
+          },
+        ],
+        process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
+      )
+      
+      // 送信ログを保存（オウム返し）
+      // Webhookは認証なしで実行されるため、adminClientを使用してRLSをバイパス
+      try {
+        const { error: insertError } = await adminClient
+          .from('message_logs')
+          .insert({
+            line_user_id: userId,
+            message_type: 'sent',
+            message_text: messageText,
+            raw_event_data: {
+              type: 'echo',
+              originalMessage: messageText,
+              echoEnabled: true,
+            },
+          })
+        
+        if (insertError) {
+          console.error('Failed to save echo message log:', insertError)
+        }
+      } catch (error) {
+        console.error('Failed to save echo message log:', error)
+      }
+      
+      return // オウム返しの場合は占い処理はスキップ
+    }
+  }
 
   // 占い実行（簡易版: メッセージが「占い」で始まる場合）
   if (messageText.startsWith('占い') || messageText.startsWith('うらない')) {
@@ -115,7 +227,38 @@ async function handleMessageEvent(event: any) {
         process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
       )
 
-      // ログ記録（返信）
+      // メッセージログに保存（送信）
+      // Webhookは認証なしで実行されるため、adminClientを使用してRLSをバイパス
+      try {
+        const replyText = fortuneResult.messages
+          .filter((msg: any) => msg.type === 'text')
+          .map((msg: any) => msg.text)
+          .join('\n')
+        
+        if (replyText) {
+          const { error: insertError } = await adminClient
+            .from('message_logs')
+            .insert({
+              line_user_id: userId,
+              message_type: 'sent',
+              message_text: replyText,
+              raw_event_data: {
+                type: 'fortune',
+                messages: fortuneResult.messages,
+                fortuneType: defaultFortuneTypeId,
+                resultValue: fortuneResult.resultValue,
+              },
+            })
+          
+          if (insertError) {
+            console.error('Failed to save sent message log:', insertError)
+          }
+        }
+      } catch (error) {
+        console.error('Failed to save sent message log:', error)
+      }
+
+      // ログ記録（返信）- 既存のline_interactionsテーブル用
       await logLineInteraction({
         userId,
         eventType: 'message',
@@ -139,16 +282,38 @@ async function handleMessageEvent(event: any) {
     }
   } else {
     // その他のメッセージにはデフォルト返信
+    const defaultReplyText = '占いを開始するには「占い YYYYMMDD」と入力してください。\n例: 占い 19900101'
+    
     await sendReplyMessage(
       replyToken,
       [
         {
           type: 'text',
-          text: '占いを開始するには「占い YYYYMMDD」と入力してください。\n例: 占い 19900101',
+          text: defaultReplyText,
         },
       ],
       process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
     )
+    
+    // 送信ログを保存
+    try {
+      const { error: insertError } = await adminClient
+        .from('message_logs')
+        .insert({
+          line_user_id: userId,
+          message_type: 'sent',
+          message_text: defaultReplyText,
+          raw_event_data: {
+            type: 'default_reply',
+          },
+        })
+      
+      if (insertError) {
+        console.error('Failed to save default reply message log:', insertError)
+      }
+    } catch (error) {
+      console.error('Failed to save default reply message log:', error)
+    }
   }
 }
 
@@ -163,6 +328,44 @@ async function getDefaultRuleGenerationId(supabase: any): Promise<string | null>
     .single()
 
   return generation?.id || null
+}
+
+async function getFortuneTellerId(adminClient: any): Promise<string | null> {
+  try {
+    // LINE設定から最初の占い師IDを取得（簡易版）
+    // 実際の実装では、LINE設定から複数の占い師を管理する必要がある場合がある
+    const { data: settings, error } = await adminClient
+      .from('line_settings')
+      .select('fortune_teller_id')
+      .limit(1)
+      .maybeSingle()
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Failed to get fortune teller ID:', error)
+      return null
+    }
+
+    if (settings) {
+      return settings.fortune_teller_id
+    }
+
+    // line_settingsにデータがない場合、user_profilesから最初の占い師IDを取得
+    const { data: userProfile, error: profileError } = await adminClient
+      .from('user_profiles')
+      .select('id')
+      .limit(1)
+      .maybeSingle()
+
+    if (profileError && profileError.code !== 'PGRST116') {
+      console.error('Failed to get user profile:', profileError)
+      return null
+    }
+
+    return userProfile?.id || null
+  } catch (error) {
+    console.error('Failed to get fortune teller ID:', error)
+    return null
+  }
 }
 
 
