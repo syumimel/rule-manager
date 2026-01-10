@@ -36,3 +36,4 @@ WHERE tablename = 'user_profiles'
 -- 4. 既存のuser_profilesレコードを確認（nameカラムがあるかどうか）
 SELECT * FROM public.user_profiles LIMIT 5;
 
+

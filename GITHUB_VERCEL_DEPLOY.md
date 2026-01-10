@@ -189,3 +189,4 @@ supabase functions deploy calculate-random
 - [Next.js Deployment](https://nextjs.org/docs/deployment)
 - [Supabase Documentation](https://supabase.com/docs)
 
+

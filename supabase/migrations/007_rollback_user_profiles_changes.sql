@@ -27,3 +27,4 @@ DROP POLICY IF EXISTS "System can insert user profiles" ON public.user_profiles;
 -- 以下のクエリで確認できます（オプション）
 -- SELECT pg_get_functiondef(oid) FROM pg_proc WHERE proname = 'handle_new_user';
 
+
