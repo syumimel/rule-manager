@@ -39,7 +39,8 @@ export async function updateSession(request: NextRequest) {
     !user &&
     !request.nextUrl.pathname.startsWith('/login') &&
     !request.nextUrl.pathname.startsWith('/auth') &&
-    !request.nextUrl.pathname.startsWith('/api/line/webhook')
+    !request.nextUrl.pathname.startsWith('/api/line/webhook') &&
+    !request.nextUrl.pathname.startsWith('/api/imagemap') // LINEサーバーからアクセスされる画像プロキシAPIは認証不要
   ) {
     // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone()

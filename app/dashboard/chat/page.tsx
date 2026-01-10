@@ -4,6 +4,8 @@ import { useEffect, useState, useRef } from 'react'
 import { MessageLog } from '@/lib/chat/message-log'
 import { maskUserId, formatDateTime } from '@/lib/chat/utils'
 import { createClient } from '@/lib/supabase/client'
+import { Imagemap } from '@/lib/imagemap/types'
+import { toLineMessage } from '@/lib/imagemap/utils'
 
 interface Thread {
   lineUserId: string
@@ -24,6 +26,9 @@ export default function ChatPage() {
   const [jsonInput, setJsonInput] = useState('')
   const [sendingJson, setSendingJson] = useState(false)
   const [jsonError, setJsonError] = useState<string | null>(null)
+  const [showImagemapSelector, setShowImagemapSelector] = useState(false)
+  const [imagemaps, setImagemaps] = useState<Imagemap[]>([])
+  const [loadingImagemaps, setLoadingImagemaps] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
 
@@ -113,6 +118,64 @@ export default function ChatPage() {
   useEffect(() => {
     fetchThreads()
   }, [])
+
+  // イメージマップ一覧を取得
+  const fetchImagemaps = async () => {
+    try {
+      setLoadingImagemaps(true)
+      const response = await fetch('/api/imagemaps')
+      if (!response.ok) throw new Error('Failed to fetch imagemaps')
+      const data = await response.json()
+      setImagemaps((data.imagemaps || []).filter((img: Imagemap) => img.is_active))
+    } catch (error) {
+      console.error('Failed to fetch imagemaps:', error)
+    } finally {
+      setLoadingImagemaps(false)
+    }
+  }
+
+  // イメージマップ送信
+  const handleSendImagemap = async (imagemap: Imagemap) => {
+    if (!selectedThread || sendingJson) return
+
+    try {
+      setSendingJson(true)
+      setJsonError(null)
+
+      // LINE Messaging API形式に変換
+      const lineMessage = toLineMessage(imagemap)
+
+      // LINE APIで送信
+      const response = await fetch('/api/chat/messages/send-json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: selectedThread,
+          messages: [lineMessage],
+        }),
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        setJsonError(error.error || '送信に失敗しました')
+        return
+      }
+
+      // 送信成功
+      setShowImagemapSelector(false)
+      setJsonError(null)
+      
+      // メッセージ一覧を再取得
+      setTimeout(async () => {
+        await fetchMessages(selectedThread, true)
+      }, 500)
+    } catch (error: any) {
+      console.error('Failed to send imagemap:', error)
+      setJsonError('イメージマップの送信に失敗しました')
+    } finally {
+      setSendingJson(false)
+    }
+  }
 
   // Realtime購読
   useEffect(() => {
@@ -473,6 +536,54 @@ export default function ChatPage() {
                     </button>
                   </div>
                 </div>
+              </div>
+
+              {/* イメージマップ送信 */}
+              <div className="border-t border-gray-300 pt-4">
+                <button
+                  onClick={() => {
+                    setShowImagemapSelector(!showImagemapSelector)
+                    if (!showImagemapSelector && imagemaps.length === 0) {
+                      fetchImagemaps()
+                    }
+                  }}
+                  className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded"
+                >
+                  {showImagemapSelector ? 'イメージマップ選択を閉じる' : 'イメージマップを送信'}
+                </button>
+
+                {showImagemapSelector && (
+                  <div className="mt-4 p-4 bg-white border border-gray-300 rounded-lg max-h-60 overflow-y-auto">
+                    {loadingImagemaps ? (
+                      <div className="text-center py-4 text-gray-500">読み込み中...</div>
+                    ) : imagemaps.length === 0 ? (
+                      <div className="text-center py-4 text-gray-500">
+                        利用可能なイメージマップがありません
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {imagemaps.map((imagemap) => (
+                          <button
+                            key={imagemap.id}
+                            onClick={() => handleSendImagemap(imagemap)}
+                            disabled={sendingJson}
+                            className={`w-full text-left p-3 border border-gray-300 rounded hover:bg-gray-50 ${
+                              sendingJson ? 'opacity-50 cursor-not-allowed' : ''
+                            }`}
+                          >
+                            <div className="font-semibold">{imagemap.name}</div>
+                            <div className="text-xs text-gray-500">
+                              {imagemap.folder_id} - {imagemap.base_width} × {imagemap.base_height}
+                            </div>
+                            <div className="text-xs text-gray-400 mt-1">
+                              {imagemap.alt_text}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </>
