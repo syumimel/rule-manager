@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { logLineInteraction } from '@/modules/log/line'
 import { saveReceivedMessage, saveSentMessage } from '@/lib/chat/message-log'
+import { findMatchingAutoReply } from '@/lib/auto-reply/manager'
 
 export async function POST(request: NextRequest) {
   try {
@@ -170,6 +171,77 @@ async function handleMessageEvent(event: any) {
       }
       
       return // オウム返しの場合は占い処理はスキップ
+    }
+
+    // 自動返信をチェック
+    const autoReply = await findMatchingAutoReply(fortuneTellerId, messageText)
+    
+    if (autoReply) {
+      // 自動返信を実行
+      if (autoReply.reply_type === 'text' && autoReply.reply_text) {
+        // テキスト返信
+        await sendReplyMessage(
+          replyToken,
+          [
+            {
+              type: 'text',
+              text: autoReply.reply_text,
+            },
+          ],
+          process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
+        )
+
+        // 送信ログを保存
+        try {
+          await adminClient.from('message_logs').insert({
+            line_user_id: userId,
+            message_type: 'sent',
+            message_text: autoReply.reply_text,
+            raw_event_data: {
+              type: 'auto_reply',
+              auto_reply_id: autoReply.id,
+              keyword: autoReply.keyword,
+              match_type: autoReply.match_type,
+            },
+          })
+        } catch (error) {
+          console.error('Failed to save auto reply message log:', error)
+        }
+      } else if (autoReply.reply_type === 'json' && autoReply.reply_json) {
+        // JSON返信
+        await sendReplyMessage(
+          replyToken,
+          autoReply.reply_json,
+          process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
+        )
+
+        // 送信ログを保存
+        try {
+          const replyText = autoReply.reply_json
+            .filter((msg: any) => msg.type === 'text')
+            .map((msg: any) => msg.text)
+            .join('\n')
+          
+          if (replyText) {
+            await adminClient.from('message_logs').insert({
+              line_user_id: userId,
+              message_type: 'sent',
+              message_text: replyText,
+              raw_event_data: {
+                type: 'auto_reply',
+                auto_reply_id: autoReply.id,
+                keyword: autoReply.keyword,
+                match_type: autoReply.match_type,
+                messages: autoReply.reply_json,
+              },
+            })
+          }
+        } catch (error) {
+          console.error('Failed to save auto reply message log:', error)
+        }
+      }
+      
+      return // 自動返信の場合は占い処理はスキップ
     }
   }
 

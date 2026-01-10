@@ -27,6 +27,7 @@ export default function DashboardNav({ user }: DashboardNavProps) {
     { href: '/dashboard/fortune-types', label: '占いタイプ' },
     { href: '/dashboard/message-templates', label: 'メッセージテンプレート' },
     { href: '/dashboard/chat', label: 'チャット' },
+    { href: '/dashboard/auto-replies', label: '自動返信' },
     { href: '/dashboard/logs', label: 'ログ' },
     { href: '/dashboard/settings', label: '設定' },
   ]
