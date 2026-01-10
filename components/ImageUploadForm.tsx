@@ -12,6 +12,8 @@ interface UploadResult {
   success: boolean
   error?: string
   image?: any
+  images?: any[]
+  warning?: string
 }
 
 interface ImageUploadFormProps {
@@ -19,7 +21,7 @@ interface ImageUploadFormProps {
 }
 
 export default function ImageUploadForm({ rules }: ImageUploadFormProps) {
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<File[]>([])
   const [name, setName] = useState('')
   const [selectedRuleId, setSelectedRuleId] = useState('')
   const [loading, setLoading] = useState(false)
@@ -27,8 +29,9 @@ export default function ImageUploadForm({ rules }: ImageUploadFormProps) {
   const router = useRouter()
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0])
+    if (e.target.files && e.target.files.length > 0) {
+      const fileArray = Array.from(e.target.files)
+      setFiles(fileArray)
       setResult(null)
     }
   }
@@ -36,7 +39,7 @@ export default function ImageUploadForm({ rules }: ImageUploadFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!file) {
+    if (files.length === 0) {
       setResult({ success: false, error: 'ファイルを選択してください' })
       return
     }
@@ -50,38 +53,67 @@ export default function ImageUploadForm({ rules }: ImageUploadFormProps) {
     setResult(null)
 
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('name', name)
-      if (selectedRuleId) {
-        formData.append('ruleId', selectedRuleId)
+      // 複数ファイルを順番にアップロード
+      const results = []
+      const errors = []
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        
+        // 画像名に連番を付与（3桁のゼロ埋め）
+        const suffix = files.length > 1 ? `_${String(i + 1).padStart(3, '0')}` : ''
+        const imageName = `${name.trim()}${suffix}`
+
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('name', imageName)
+        if (selectedRuleId) {
+          formData.append('ruleId', selectedRuleId)
+        }
+
+        const response = await fetch('/api/images/upload', {
+          method: 'POST',
+          body: formData,
+        })
+
+        const data = await response.json()
+
+        if (response.ok && data.success) {
+          results.push(data.image)
+        } else {
+          errors.push(`${imageName}: ${data.error || 'アップロードに失敗しました'}`)
+        }
       }
 
-      const response = await fetch('/api/images/upload', {
-        method: 'POST',
-        body: formData,
-      })
-
-      const data = await response.json()
-
-      if (response.ok && data.success) {
+      if (results.length > 0) {
         setResult({
           success: true,
-          image: data.image,
+          image: results[0], // 最初の画像をプレビュー用に表示
+          images: results, // 全画像の情報を保持
         })
         // フォームをリセット
-        setFile(null)
+        setFiles([])
         setName('')
         setSelectedRuleId('')
         const fileInput = document.getElementById('image-file') as HTMLInputElement
         if (fileInput) {
           fileInput.value = ''
         }
+        
+        if (errors.length > 0) {
+          setResult({
+            success: true,
+            image: results[0],
+            images: results,
+            warning: `${results.length}件のアップロード成功。${errors.length}件失敗: ${errors.join(', ')}`,
+          })
+        }
+        
         router.refresh()
       } else {
         setResult({
           success: false,
-          error: data.error || 'アップロードに失敗しました',
+          error: errors.length > 0 ? errors.join(', ') : 'アップロードに失敗しました',
         })
       }
     } catch (error: any) {
@@ -141,12 +173,19 @@ export default function ImageUploadForm({ rules }: ImageUploadFormProps) {
             type="file"
             accept="image/jpeg,image/png,image/gif"
             onChange={handleFileChange}
+            multiple
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             required
           />
           <p className="mt-1 text-sm text-gray-500">
-            JPEG、PNG、GIF形式、最大10MBまで対応
+            JPEG、PNG、GIF形式、最大10MBまで対応。複数選択可能（複数の場合、画像名に自動で連番を付与します）
           </p>
+          {files.length > 0 && (
+            <div className="mt-2 text-sm text-blue-600">
+              選択中: {files.length}件のファイル
+              {files.length > 1 && `（画像名: ${name.trim()}_001 〜 ${name.trim()}_${String(files.length).padStart(3, '0')}）`}
+            </div>
+          )}
         </div>
 
         <button
@@ -167,6 +206,9 @@ export default function ImageUploadForm({ rules }: ImageUploadFormProps) {
           {result.success ? (
             <div>
               <p className="font-semibold">アップロード成功！</p>
+              {result.warning && (
+                <p className="mt-2 text-yellow-700 bg-yellow-50 p-2 rounded">{result.warning}</p>
+              )}
               {result.image && (
                 <div className="mt-2">
                   <img
@@ -174,6 +216,17 @@ export default function ImageUploadForm({ rules }: ImageUploadFormProps) {
                     alt={result.image.name}
                     className="max-w-xs rounded"
                   />
+                  <p className="mt-1 text-sm">画像名: {result.image.name}</p>
+                </div>
+              )}
+              {result.images && result.images.length > 1 && (
+                <div className="mt-2 text-sm">
+                  <p>アップロードされた画像: {result.images.length}件</p>
+                  <ul className="mt-1 list-disc list-inside">
+                    {result.images.map((img: any, idx: number) => (
+                      <li key={idx}>{img.name}</li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>
