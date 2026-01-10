@@ -62,32 +62,60 @@ async function handleImageRequest(
       size = '1040'
     }
 
-    // Supabaseストレージのパス: imagemap/{folder}/{size}.jpg
-    const storagePath = `${STORAGE_PATH_PREFIX}/${folder}/${size}.jpg`
+    // 画像フォーマットを検出（拡張子なしなので、複数の拡張子を試す）
+    const possibleExtensions = ['png', 'jpg', 'webp']
+    let storagePath: string | null = null
+    let imageData: Blob | null = null
+    let imageError: any = null
+    let contentType = 'image/jpeg' // デフォルト
 
-    // Supabaseから画像を取得
-    const { data, error } = await adminClient.storage
-      .from(BUCKET_NAME)
-      .download(storagePath)
+    // 各拡張子を試す
+    for (const ext of possibleExtensions) {
+      const testPath = `${STORAGE_PATH_PREFIX}/${folder}/${size}.${ext}`
+      const { data, error } = await adminClient.storage
+        .from(BUCKET_NAME)
+        .download(testPath)
 
-    if (error || !data) {
-      console.error('Storage error:', error, 'Path:', storagePath)
+      if (!error && data) {
+        storagePath = testPath
+        imageData = data
+        // Content-Typeを拡張子から決定
+        contentType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
+        break
+      }
+      imageError = error
+    }
+
+    if (!imageData || !storagePath) {
+      console.error('Storage error:', imageError, 'Tried paths:', possibleExtensions.map(ext => `${STORAGE_PATH_PREFIX}/${folder}/${size}.${ext}`))
       return NextResponse.json(
-        { error: `Image not found: ${storagePath}` },
+        { error: `Image not found: ${STORAGE_PATH_PREFIX}/${folder}/${size}` },
         { status: 404 }
       )
     }
 
     // 画像をBufferに変換
-    const buffer = await data.arrayBuffer()
+    const buffer = await imageData.arrayBuffer()
     
-    // 画像であることを確認（最初の数バイトでJPEGのマジックナンバーをチェック）
+    // 画像であることを確認（マジックナンバーをチェック）
     const uint8Array = new Uint8Array(buffer)
     const isJpeg = uint8Array.length >= 2 && uint8Array[0] === 0xFF && uint8Array[1] === 0xD8
-    
-    if (!isJpeg && !headOnly) {
-      console.error('Invalid image format:', storagePath)
-      // HTMLやテキストが返されている可能性がある場合でも、強制的に画像として返す
+    const isPng = uint8Array.length >= 8 && 
+                  uint8Array[0] === 0x89 && uint8Array[1] === 0x50 && 
+                  uint8Array[2] === 0x4E && uint8Array[3] === 0x47
+    const isWebp = uint8Array.length >= 12 &&
+                   uint8Array[0] === 0x52 && uint8Array[1] === 0x49 &&
+                   uint8Array[2] === 0x46 && uint8Array[3] === 0x46 &&
+                   uint8Array[8] === 0x57 && uint8Array[9] === 0x45 &&
+                   uint8Array[10] === 0x42 && uint8Array[11] === 0x50
+
+    // 実際のフォーマットに基づいてContent-Typeを設定
+    if (isPng) {
+      contentType = 'image/png'
+    } else if (isWebp) {
+      contentType = 'image/webp'
+    } else if (isJpeg) {
+      contentType = 'image/jpeg'
     }
 
     // HEADリクエストの場合は、メタデータのみ返す
@@ -95,7 +123,7 @@ async function handleImageRequest(
       return new NextResponse(null, {
         status: 200,
         headers: {
-          'Content-Type': 'image/jpeg',
+          'Content-Type': contentType,
           'Content-Length': buffer.byteLength.toString(),
           'Cache-Control': 'public, max-age=31536000, immutable',
           // LINEが要求する可能性のあるヘッダー
@@ -109,7 +137,7 @@ async function handleImageRequest(
     return new NextResponse(buffer, {
       status: 200,
       headers: {
-        'Content-Type': 'image/jpeg',
+        'Content-Type': contentType,
         'Content-Length': buffer.byteLength.toString(),
         'Cache-Control': 'public, max-age=31536000, immutable', // 1年間キャッシュ
         // LINEが要求する可能性のあるヘッダー
