@@ -132,3 +132,4 @@ ngrokを使い続ける場合、以下の設定を試してください：
 - [LINE Messaging API - Imagemap Message](https://developers.line.biz/ja/reference/messaging-api/#imagemap-message)
 
 
+

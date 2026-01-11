@@ -61,3 +61,4 @@ WHERE pubname = 'supabase_realtime'
   AND tablename = 'message_logs';
 
 
+

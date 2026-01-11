@@ -9,6 +9,8 @@ import {
   generateRandom,
   getTableValue,
   getImageUrl,
+  getImageName,
+  getImageUrlByName,
   getLatestActiveGenerationId,
 } from './functions'
 
@@ -98,18 +100,47 @@ async function evaluateExpression(
   while (result.includes('${') && iteration < maxIterations) {
     iteration++
     const previousResult = result
-    const regex = /\$\{([^}]+)\}/g
-    const matches: Array<{ fullMatch: string; content: string; index: number }> = []
-    let match
+    
+    // ネストした${}式を正しく見つけるためのヘルパー関数
+    // 最も外側の${}を優先的に見つける
+    function findNestedExpressions(text: string): Array<{ fullMatch: string; content: string; index: number }> {
+      const matches: Array<{ fullMatch: string; content: string; index: number }> = []
+      let startIndex = 0
+      while (startIndex < text.length) {
+        const openBraceIndex = text.indexOf('${', startIndex)
+        if (openBraceIndex === -1) {
+          break
+        }
 
-    // 全ての${}パターンを収集
-    while ((match = regex.exec(result)) !== null) {
-      matches.push({
-        fullMatch: match[0],
-        content: match[1],
-        index: match.index,
-      })
+        let balance = 1
+        let closeBraceIndex = -1
+        for (let i = openBraceIndex + 2; i < text.length; i++) {
+          if (text[i] === '{' && text[i - 1] === '$') {
+            balance++
+          } else if (text[i] === '}') {
+            balance--
+          }
+
+          if (balance === 0) {
+            closeBraceIndex = i
+            break
+          }
+        }
+
+        if (closeBraceIndex !== -1) {
+          const fullMatch = text.substring(openBraceIndex, closeBraceIndex + 1)
+          const content = text.substring(openBraceIndex + 2, closeBraceIndex)
+          matches.push({ fullMatch, content, index: openBraceIndex })
+          startIndex = closeBraceIndex + 1
+        } else {
+          // マッチが見つからない場合は無限ループを防ぐ
+          break
+        }
+      }
+      return matches
     }
+    
+    const matches = findNestedExpressions(result)
 
     if (matches.length === 0) {
       break
@@ -128,7 +159,9 @@ async function evaluateExpression(
         const { args } = funcMatch
         const evaluatedArgs: string[] = []
         for (const arg of args) {
-          const unquoted = unquoteArg(arg)
+            console.log('[ILE engine] Processing arg (before unquoteArg):', JSON.stringify(arg), 'for function:', funcMatch.name)
+            const unquoted = unquoteArg(arg)
+            console.log('[ILE engine] After unquoteArg:', JSON.stringify(unquoted))
           if (unquoted.includes('${')) {
             evaluatedArgs.push(await evaluateExpression(unquoted, context))
           } else {
@@ -136,7 +169,8 @@ async function evaluateExpression(
             if (funcCallMatch) {
               evaluatedArgs.push(await evaluateExpression(`\${${unquoted}}`, context))
             } else {
-              evaluatedArgs.push(unquoted)
+              console.log('[ILE engine] Pushing unquoted as-is:', JSON.stringify(unquoted))
+                evaluatedArgs.push(unquoted)
             }
           }
         }
@@ -155,7 +189,9 @@ async function evaluateExpression(
           const { name, args } = funcMatch
           const evaluatedArgs: string[] = []
           for (const arg of args) {
+            console.log('[ILE engine] Processing arg (before unquoteArg):', JSON.stringify(arg), 'for function:', name)
             const unquoted = unquoteArg(arg)
+            console.log('[ILE engine] After unquoteArg:', JSON.stringify(unquoted))
             if (unquoted.includes('${')) {
               evaluatedArgs.push(await evaluateExpression(unquoted, context))
             } else {
@@ -163,10 +199,13 @@ async function evaluateExpression(
               if (funcCallMatch) {
                 evaluatedArgs.push(await evaluateExpression(`\${${unquoted}}`, context))
               } else {
+                console.log('[ILE engine] Pushing unquoted as-is:', JSON.stringify(unquoted))
                 evaluatedArgs.push(unquoted)
               }
             }
           }
+          console.log('[ILE engine] Final evaluatedArgs for', name, ':', JSON.stringify(evaluatedArgs))
+          
           
           switch (name) {
             case 'rand':
@@ -179,12 +218,42 @@ async function evaluateExpression(
               }
               break
             case 'tbl':
-              if (evaluatedArgs.length === 3) {
+              // 2引数の場合: ${tbl(row_number, field_name)} - generation_idは空文字（最新を使用）
+              // 3引数の場合: ${tbl(generation_id, row_number, field_name)}
+              if (evaluatedArgs.length === 2) {
+                const rowNumber = parseInt(evaluatedArgs[0], 10)
+                const fieldName = evaluatedArgs[1]
+                if (!isNaN(rowNumber) && fieldName) {
+                  evaluated = await getTableValue('', rowNumber, fieldName, context)
+                }
+              } else if (evaluatedArgs.length === 3) {
                 const generationId = evaluatedArgs[0]
                 const rowNumber = parseInt(evaluatedArgs[1], 10)
                 const fieldName = evaluatedArgs[2]
-                if (generationId && !isNaN(rowNumber) && fieldName) {
+                if (!isNaN(rowNumber) && fieldName) {
                   evaluated = await getTableValue(generationId, rowNumber, fieldName, context)
+                }
+              }
+              break
+            case 'get_name':
+              if (evaluatedArgs.length === 2) {
+                const prefix = evaluatedArgs[0]
+                const suffix = evaluatedArgs[1]
+                console.log('[ILE engine] get_name - evaluatedArgs:', JSON.stringify(evaluatedArgs))
+                console.log('[ILE engine] get_name - prefix:', JSON.stringify(prefix), 'suffix:', JSON.stringify(suffix))
+                if (prefix && suffix !== undefined) {
+                  evaluated = getImageName(prefix, suffix)
+                  console.log('[ILE engine] get_name - evaluated result:', JSON.stringify(evaluated))
+                }
+              }
+              break
+            case 'get_url':
+              if (evaluatedArgs.length === 1) {
+                const imageName = evaluatedArgs[0]
+                console.log('[ILE engine] get_url - imageName:', JSON.stringify(imageName))
+                if (imageName) {
+                  evaluated = await getImageUrlByName(imageName, context)
+                  console.log('[ILE engine] get_url - evaluated result:', JSON.stringify(evaluated))
                 }
               }
               break

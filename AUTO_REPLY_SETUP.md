@@ -80,3 +80,4 @@ SELECT EXISTS (
 - エラーが発生する場合は、Supabase Dashboard > Logs > Postgres Logs で確認してください
 
 
+

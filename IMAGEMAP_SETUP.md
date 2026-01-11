@@ -198,3 +198,4 @@ Next.js APIルート `/api/imagemap/[...path]` がこのリクエストをイン
 - [Sharp - 高性能な画像処理ライブラリ](https://sharp.pixelplumbing.com/)
 
 
+

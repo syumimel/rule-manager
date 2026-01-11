@@ -50,3 +50,4 @@ CREATE TRIGGER update_auto_replies_updated_at BEFORE UPDATE ON public.auto_repli
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 
+

@@ -70,23 +70,8 @@ export default function AutoRepliesPage() {
       match_type: autoReply.match_type,
     })
     if (autoReply.reply_type === 'json' && autoReply.reply_json) {
-      // __vars__が配列形式の場合、オブジェクト形式に変換して表示
-      const replyJson = autoReply.reply_json as any
-      const displayJson = Array.isArray(replyJson) ? replyJson : { ...replyJson }
-      if (!Array.isArray(displayJson) && displayJson.__vars__ && Array.isArray(displayJson.__vars__)) {
-        const varsObj: Record<string, any> = {}
-        for (const item of displayJson.__vars__) {
-          if (item && typeof item === 'object' && !Array.isArray(item)) {
-            // [{"row_idx": "${rand:1:100}"}, ...] 形式からオブジェクト形式に変換
-            for (const [key, value] of Object.entries(item)) {
-              varsObj[key] = value
-              break // 最初のキー-値ペアのみを使用
-            }
-          }
-        }
-        displayJson.__vars__ = varsObj
-      }
-      setJsonInput(JSON.stringify(displayJson, null, 2))
+      // 配列形式の__vars__はそのまま表示（順序を保持）
+      setJsonInput(JSON.stringify(autoReply.reply_json, null, 2))
     } else {
       setJsonInput('')
     }

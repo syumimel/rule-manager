@@ -84,16 +84,41 @@ export async function getTableValue(
 }
 
 /**
- * 画像変換: ${img_conv(prefix, suffix)}
+ * 画像名生成: ${get_name(prefix, suffix)}
+ * prefixとsuffixを結合して画像名を生成（suffixは0埋め3桁）
+ */
+export function getImageName(prefix: string, suffix: string): string {
+  console.log('[getImageName] Input - prefix:', JSON.stringify(prefix), 'suffix:', JSON.stringify(suffix))
+  
+  // prefixからクォートを削除（確実に削除するため、複数回試行）
+  let cleanPrefix = String(prefix).trim()
+  console.log('[getImageName] After trim - cleanPrefix:', JSON.stringify(cleanPrefix))
+  
+  // クォートを削除（シングルクォートとダブルクォートの両方をチェック）
+  while (
+    (cleanPrefix.startsWith("'") && cleanPrefix.endsWith("'")) ||
+    (cleanPrefix.startsWith('"') && cleanPrefix.endsWith('"'))
+  ) {
+    cleanPrefix = cleanPrefix.slice(1, -1).trim()
+    console.log('[getImageName] After unquote - cleanPrefix:', JSON.stringify(cleanPrefix))
+  }
+  
+  // suffixを0埋め3桁に変換（例: 3 → "003", 42 → "042"）
+  const paddedSuffix = String(suffix).padStart(3, '0')
+  const result = `${cleanPrefix}${paddedSuffix}`
+  console.log('[getImageName] Result:', JSON.stringify(result))
+  return result
+}
+
+/**
+ * 画像URL取得: ${get_url(name)}
  * imagesテーブルからnameフィールドで検索してurlを返す
  */
-export async function getImageUrl(
-  prefix: string,
-  suffix: string,
+export async function getImageUrlByName(
+  imageName: string,
   context: ILEContext
 ): Promise<string> {
   try {
-    const imageName = `${prefix}${suffix}`
     const adminClient = createAdminClient()
     
     const { data: image, error } = await adminClient
@@ -108,9 +133,22 @@ export async function getImageUrl(
     }
     return image.url
   } catch (error) {
-    console.error('getImageUrl error:', error)
+    console.error('getImageUrlByName error:', error)
     return ''
   }
+}
+
+/**
+ * 画像変換: ${img_conv(prefix, suffix)} (後方互換性のため残す)
+ * imagesテーブルからnameフィールドで検索してurlを返す
+ */
+export async function getImageUrl(
+  prefix: string,
+  suffix: string,
+  context: ILEContext
+): Promise<string> {
+  const imageName = getImageName(prefix, suffix)
+  return await getImageUrlByName(imageName, context)
 }
 
 /**
