@@ -197,3 +197,4 @@ Next.js APIルート `/api/imagemap/[...path]` がこのリクエストをイン
 - [LINE Messaging API - イメージマップメッセージ](https://developers.line.biz/ja/reference/messaging-api/#imagemap-message)
 - [Sharp - 高性能な画像処理ライブラリ](https://sharp.pixelplumbing.com/)
 
+

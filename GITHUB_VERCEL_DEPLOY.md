@@ -190,3 +190,4 @@ supabase functions deploy calculate-random
 - [Supabase Documentation](https://supabase.com/docs)
 
 
+

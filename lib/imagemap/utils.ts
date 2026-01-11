@@ -18,3 +18,4 @@ export function toLineMessage(imagemap: Imagemap): ImagemapLineMessage {
   }
 }
 
+

@@ -37,3 +37,4 @@ FROM public.message_logs
 ORDER BY created_at DESC
 LIMIT 10;
 
+

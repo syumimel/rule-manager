@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { logLineInteraction } from '@/modules/log/line'
 import { saveReceivedMessage, saveSentMessage } from '@/lib/chat/message-log'
 import { findMatchingAutoReply } from '@/lib/auto-reply/manager'
+import { processILEMessages } from '@/lib/ile/engine'
 
 export async function POST(request: NextRequest) {
   try {
@@ -136,7 +137,7 @@ async function handleMessageEvent(event: any) {
     
     if (echoEnabled) {
       // オウム返しを実行
-      await sendReplyMessage(
+      const echoResult = await sendReplyMessage(
         replyToken,
         [
           {
@@ -147,7 +148,7 @@ async function handleMessageEvent(event: any) {
         process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
       )
       
-      // 送信ログを保存（オウム返し）
+      // 送信ログを保存（オウム返し、エラー時も保存）
       // Webhookは認証なしで実行されるため、adminClientを使用してRLSをバイパス
       try {
         const { error: insertError } = await adminClient
@@ -160,7 +161,13 @@ async function handleMessageEvent(event: any) {
               type: 'echo',
               originalMessage: messageText,
               echoEnabled: true,
+              success: echoResult.success,
+              error: echoResult.error || null,
             },
+            formatted_payload: echoResult.success ? {
+              replyToken,
+              messages: [{ type: 'text', text: messageText }],
+            } : null,
           })
         
         if (insertError) {
@@ -180,7 +187,7 @@ async function handleMessageEvent(event: any) {
       // 自動返信を実行
       if (autoReply.reply_type === 'text' && autoReply.reply_text) {
         // テキスト返信
-        await sendReplyMessage(
+        const textResult = await sendReplyMessage(
           replyToken,
           [
             {
@@ -191,7 +198,7 @@ async function handleMessageEvent(event: any) {
           process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
         )
 
-        // 送信ログを保存
+        // 送信ログを保存（エラー時も保存）
         try {
           await adminClient.from('message_logs').insert({
             line_user_id: userId,
@@ -202,40 +209,67 @@ async function handleMessageEvent(event: any) {
               auto_reply_id: autoReply.id,
               keyword: autoReply.keyword,
               match_type: autoReply.match_type,
+              success: textResult.success,
+              error: textResult.error || null,
             },
+            formatted_payload: textResult.success ? {
+              replyToken,
+              messages: [{ type: 'text', text: autoReply.reply_text }],
+            } : null,
           })
         } catch (error) {
           console.error('Failed to save auto reply message log:', error)
         }
       } else if (autoReply.reply_type === 'json' && autoReply.reply_json) {
-        // JSON返信
-        await sendReplyMessage(
+        // JSON返信（ILEエンジンで処理）
+        let processedMessages: any[] = []
+        let ileError: string | null = null
+        
+        try {
+          processedMessages = await processILEMessages(
+            autoReply.reply_json,
+            fortuneTellerId
+          )
+        } catch (error: any) {
+          console.error('ILE processing error:', error)
+          ileError = error.message || 'ILE処理エラー'
+          // エラー時は元のメッセージを使用
+          processedMessages = autoReply.reply_json
+        }
+
+        const jsonResult = await sendReplyMessage(
           replyToken,
-          autoReply.reply_json,
+          processedMessages,
           process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
         )
 
-        // 送信ログを保存
+        // 送信ログを保存（エラー時も保存）
         try {
-          const replyText = autoReply.reply_json
+          const replyText = processedMessages
             .filter((msg: any) => msg.type === 'text')
             .map((msg: any) => msg.text)
             .join('\n')
           
-          if (replyText) {
-            await adminClient.from('message_logs').insert({
-              line_user_id: userId,
-              message_type: 'sent',
-              message_text: replyText,
-              raw_event_data: {
-                type: 'auto_reply',
-                auto_reply_id: autoReply.id,
-                keyword: autoReply.keyword,
-                match_type: autoReply.match_type,
-                messages: autoReply.reply_json,
-              },
-            })
-          }
+          await adminClient.from('message_logs').insert({
+            line_user_id: userId,
+            message_type: 'sent',
+            message_text: replyText || '(JSONメッセージ)',
+            raw_event_data: {
+              type: 'auto_reply',
+              auto_reply_id: autoReply.id,
+              keyword: autoReply.keyword,
+              match_type: autoReply.match_type,
+              messages: processedMessages,
+              original_messages: autoReply.reply_json,
+              ile_error: ileError,
+              success: jsonResult.success && !ileError,
+              error: jsonResult.error || ileError || null,
+            },
+            formatted_payload: jsonResult.success ? {
+              replyToken,
+              messages: processedMessages,
+            } : null,
+          })
         } catch (error) {
           console.error('Failed to save auto reply message log:', error)
         }
@@ -252,7 +286,7 @@ async function handleMessageEvent(event: any) {
     const defaultRuleGenerationId = await getDefaultRuleGenerationId(supabase)
 
     if (!defaultRuleGenerationId) {
-      await sendReplyMessage(
+      const noRuleResult = await sendReplyMessage(
         replyToken,
         [
           {
@@ -262,6 +296,27 @@ async function handleMessageEvent(event: any) {
         ],
         process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
       )
+      
+      // エラーログを保存
+      try {
+        await adminClient.from('message_logs').insert({
+          line_user_id: userId,
+          message_type: 'sent',
+          message_text: '占いルールが設定されていません。管理画面でルールをアップロードしてください。',
+          raw_event_data: {
+            type: 'fortune_no_rule',
+            success: noRuleResult.success,
+            error: noRuleResult.error || null,
+          },
+          formatted_payload: noRuleResult.success ? {
+            replyToken,
+            messages: [{ type: 'text', text: '占いルールが設定されていません。管理画面でルールをアップロードしてください。' }],
+          } : null,
+        })
+      } catch (error) {
+        console.error('Failed to save no rule message log:', error)
+      }
+      
       return
     }
 
@@ -270,7 +325,7 @@ async function handleMessageEvent(event: any) {
     const birthDate = birthDateMatch ? birthDateMatch[1] : null
 
     if (!birthDate) {
-      await sendReplyMessage(
+      const noBirthDateResult = await sendReplyMessage(
         replyToken,
         [
           {
@@ -280,6 +335,27 @@ async function handleMessageEvent(event: any) {
         ],
         process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
       )
+      
+      // エラーログを保存
+      try {
+        await adminClient.from('message_logs').insert({
+          line_user_id: userId,
+          message_type: 'sent',
+          message_text: '生年月日を入力してください。\n形式: YYYYMMDD（例: 19900101）',
+          raw_event_data: {
+            type: 'fortune_no_birthdate',
+            success: noBirthDateResult.success,
+            error: noBirthDateResult.error || null,
+          },
+          formatted_payload: noBirthDateResult.success ? {
+            replyToken,
+            messages: [{ type: 'text', text: '生年月日を入力してください。\n形式: YYYYMMDD（例: 19900101）' }],
+          } : null,
+        })
+      } catch (error) {
+        console.error('Failed to save no birthdate message log:', error)
+      }
+      
       return
     }
 
@@ -299,7 +375,7 @@ async function handleMessageEvent(event: any) {
         process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
       )
 
-      // メッセージログに保存（送信）
+      // メッセージログに保存（送信、エラー時も保存）
       // Webhookは認証なしで実行されるため、adminClientを使用してRLSをバイパス
       try {
         const replyText = fortuneResult.messages
@@ -307,24 +383,28 @@ async function handleMessageEvent(event: any) {
           .map((msg: any) => msg.text)
           .join('\n')
         
-        if (replyText) {
-          const { error: insertError } = await adminClient
-            .from('message_logs')
-            .insert({
-              line_user_id: userId,
-              message_type: 'sent',
-              message_text: replyText,
-              raw_event_data: {
-                type: 'fortune',
-                messages: fortuneResult.messages,
-                fortuneType: defaultFortuneTypeId,
-                resultValue: fortuneResult.resultValue,
-              },
-            })
-          
-          if (insertError) {
-            console.error('Failed to save sent message log:', insertError)
-          }
+        const { error: insertError } = await adminClient
+          .from('message_logs')
+          .insert({
+            line_user_id: userId,
+            message_type: 'sent',
+            message_text: replyText || '(JSONメッセージ)',
+            raw_event_data: {
+              type: 'fortune',
+              messages: fortuneResult.messages,
+              fortuneType: defaultFortuneTypeId,
+              resultValue: fortuneResult.resultValue,
+              success: replyResult.success,
+              error: replyResult.error || null,
+            },
+            formatted_payload: replyResult.success ? {
+              replyToken,
+              messages: fortuneResult.messages,
+            } : null,
+          })
+        
+        if (insertError) {
+          console.error('Failed to save sent message log:', insertError)
         }
       } catch (error) {
         console.error('Failed to save sent message log:', error)
@@ -341,7 +421,7 @@ async function handleMessageEvent(event: any) {
       })
     } else {
       // エラーメッセージを返信
-      await sendReplyMessage(
+      const errorResult = await sendReplyMessage(
         replyToken,
         [
           {
@@ -351,12 +431,34 @@ async function handleMessageEvent(event: any) {
         ],
         process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
       )
+
+      // エラーメッセージ送信ログを保存
+      try {
+        await adminClient.from('message_logs').insert({
+          line_user_id: userId,
+          message_type: 'sent',
+          message_text: fortuneResult.error || '占いの実行に失敗しました',
+          raw_event_data: {
+            type: 'fortune_error',
+            fortuneType: defaultFortuneTypeId,
+            error: fortuneResult.error,
+            success: errorResult.success,
+            send_error: errorResult.error || null,
+          },
+          formatted_payload: errorResult.success ? {
+            replyToken,
+            messages: [{ type: 'text', text: fortuneResult.error || '占いの実行に失敗しました' }],
+          } : null,
+        })
+      } catch (error) {
+        console.error('Failed to save error message log:', error)
+      }
     }
   } else {
     // その他のメッセージにはデフォルト返信
     const defaultReplyText = '占いを開始するには「占い YYYYMMDD」と入力してください。\n例: 占い 19900101'
     
-    await sendReplyMessage(
+    const defaultResult = await sendReplyMessage(
       replyToken,
       [
         {
@@ -367,7 +469,7 @@ async function handleMessageEvent(event: any) {
       process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
     )
     
-    // 送信ログを保存
+    // 送信ログを保存（エラー時も保存）
     try {
       const { error: insertError } = await adminClient
         .from('message_logs')
@@ -377,7 +479,13 @@ async function handleMessageEvent(event: any) {
           message_text: defaultReplyText,
           raw_event_data: {
             type: 'default_reply',
+            success: defaultResult.success,
+            error: defaultResult.error || null,
           },
+          formatted_payload: defaultResult.success ? {
+            replyToken,
+            messages: [{ type: 'text', text: defaultReplyText }],
+          } : null,
         })
       
       if (insertError) {

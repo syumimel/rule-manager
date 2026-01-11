@@ -37,3 +37,4 @@ WHERE tablename = 'user_profiles'
 SELECT * FROM public.user_profiles LIMIT 5;
 
 
+

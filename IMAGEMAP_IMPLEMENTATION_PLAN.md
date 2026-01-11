@@ -219,3 +219,4 @@ rule-manager/
 - [LINE Messaging API - イメージマップメッセージ](https://developers.line.biz/ja/reference/messaging-api/#imagemap-message)
 - 動作確認済みの例: `https://seminarjyoho.xsrv.jp/yahagiya/200`
 
+

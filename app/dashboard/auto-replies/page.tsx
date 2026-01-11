@@ -70,7 +70,23 @@ export default function AutoRepliesPage() {
       match_type: autoReply.match_type,
     })
     if (autoReply.reply_type === 'json' && autoReply.reply_json) {
-      setJsonInput(JSON.stringify(autoReply.reply_json, null, 2))
+      // __vars__が配列形式の場合、オブジェクト形式に変換して表示
+      const replyJson = autoReply.reply_json as any
+      const displayJson = Array.isArray(replyJson) ? replyJson : { ...replyJson }
+      if (!Array.isArray(displayJson) && displayJson.__vars__ && Array.isArray(displayJson.__vars__)) {
+        const varsObj: Record<string, any> = {}
+        for (const item of displayJson.__vars__) {
+          if (item && typeof item === 'object' && !Array.isArray(item)) {
+            // [{"row_idx": "${rand:1:100}"}, ...] 形式からオブジェクト形式に変換
+            for (const [key, value] of Object.entries(item)) {
+              varsObj[key] = value
+              break // 最初のキー-値ペアのみを使用
+            }
+          }
+        }
+        displayJson.__vars__ = varsObj
+      }
+      setJsonInput(JSON.stringify(displayJson, null, 2))
     } else {
       setJsonInput('')
     }
@@ -107,6 +123,7 @@ export default function AutoRepliesPage() {
       // バリデーション
       if (!formData.keyword.trim()) {
         setError('キーワードを入力してください')
+        setSubmitting(false)
         return
       }
 
@@ -115,6 +132,7 @@ export default function AutoRepliesPage() {
       if (formData.reply_type === 'text') {
         if (!formData.reply_text?.trim()) {
           setError('返信内容を入力してください')
+          setSubmitting(false)
           return
         }
         submitData.reply_text = formData.reply_text
@@ -122,19 +140,47 @@ export default function AutoRepliesPage() {
       } else if (formData.reply_type === 'json') {
         if (!jsonInput.trim()) {
           setError('JSONを入力してください')
+          setSubmitting(false)
           return
         }
 
         try {
           const parsed = JSON.parse(jsonInput.trim())
-          if (!Array.isArray(parsed)) {
-            setError('JSONは配列形式である必要があります')
+          
+          // 配列形式または__vars__と__messages__形式を許可
+          if (Array.isArray(parsed)) {
+            // 配列形式（直接メッセージ配列）
+            submitData.reply_json = parsed
+          } else if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) && '__messages__' in parsed) {
+            // __vars__と__messages__形式
+            if (!Array.isArray(parsed.__messages__)) {
+              setError('__messages__は配列形式である必要があります')
+              setSubmitting(false)
+              return
+            }
+            
+            // __vars__がオブジェクト形式の場合、配列形式に変換して順序を保持
+            if ('__vars__' in parsed && parsed.__vars__ && typeof parsed.__vars__ === 'object' && !Array.isArray(parsed.__vars__)) {
+              const varsObj = parsed.__vars__
+              // [{"row_idx": "${rand:1:100}"}, {"sasaki": "${row_idx}"}, ...] の形式に変換
+              const varsArray = Object.entries(varsObj).map(([key, value]) => {
+                const item: Record<string, any> = {}
+                item[key] = value
+                return item
+              })
+              parsed.__vars__ = varsArray
+            }
+            
+            submitData.reply_json = parsed
+          } else {
+            setError('JSONは配列形式、または__vars__と__messages__を含むオブジェクト形式である必要があります')
+            setSubmitting(false)
             return
           }
-          submitData.reply_json = parsed
           submitData.reply_text = null
         } catch (parseError) {
           setError('JSON形式が正しくありません')
+          setSubmitting(false)
           return
         }
       }
@@ -297,14 +343,15 @@ export default function AutoRepliesPage() {
                 <textarea
                   value={jsonInput}
                   onChange={(e) => setJsonInput(e.target.value)}
-                  placeholder={`例:\n[\n  {\n    "type": "text",\n    "text": "こんにちは\\nよろしく"\n  },\n  {\n    "type": "text",\n    "text": "お願いします。"\n  }\n]`}
+                  placeholder={`例1（配列形式）:\n[\n  {\n    "type": "text",\n    "text": "こんにちは"\n  }\n]\n\n例2（__vars__と__messages__形式）:\n{\n  "__vars__": {\n    "userName": "田中",\n    "row_idx": "\${rand:1:100}"\n  },\n  "__messages__": [\n    {"type": "text", "text": "こんにちは、\${userName}さん！"},\n    {"type": "text", "text": "ラッキーナンバーは\${row_idx}です✨"}\n  ]\n}`}
                   className="w-full px-4 py-2 border border-gray-300 rounded font-mono text-sm"
-                  rows={8}
+                  rows={12}
                   style={{ fontFamily: 'monospace', fontSize: '0.875rem' }}
                   required
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  LINE Messaging API形式のJSONを入力（最大5メッセージ）
+                  LINE Messaging API形式のJSONを入力（最大5メッセージ）<br />
+                  配列形式、または__vars__と__messages__を含むオブジェクト形式が使用できます
                 </p>
               </div>
             )}
@@ -448,4 +495,5 @@ export default function AutoRepliesPage() {
     </div>
   )
 }
+
 

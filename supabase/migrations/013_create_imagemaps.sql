@@ -50,3 +50,4 @@ CREATE POLICY "Admins can manage all imagemaps"
 CREATE TRIGGER update_imagemaps_updated_at BEFORE UPDATE ON public.imagemaps
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
+

@@ -20,11 +20,10 @@ export default async function LogsPage({
   const limit = 50
   const offset = (page - 1) * limit
 
-  // LINEやり取りログを取得
-  // 注意: 実際の実装では、占い師ごとのログを取得する必要があります
-  // 現在は簡易版として、全ログを取得しています
+  // message_logsテーブルから送信/受信メッセージを取得
+  // 占い師が管理しているLINEユーザーのログを取得
   const { data: logs, error, count } = await supabase
-    .from('line_interactions')
+    .from('message_logs')
     .select('*', { count: 'exact' })
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1)
@@ -33,7 +32,7 @@ export default async function LogsPage({
 
   return (
     <div>
-      <h1 className="text-3xl font-bold mb-8">ログ確認</h1>
+      <h1 className="text-3xl font-bold mb-8">メッセージログ</h1>
       
       {error ? (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
