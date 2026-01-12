@@ -3,10 +3,22 @@
  */
 export async function pushMessage(
   userId: string,
-  messageText: string
+  messageText: string,
+  fortuneTellerId?: string
 ): Promise<{ success: boolean; error?: string; statusCode?: number }> {
   try {
-    const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN
+    // fortuneTellerIdが指定されている場合はデータベースから取得
+    let accessToken: string | null = null
+    if (fortuneTellerId) {
+      const { getChannelAccessToken } = await import('@/modules/line/reply')
+      accessToken = await getChannelAccessToken(fortuneTellerId)
+    }
+    
+    // データベースから取得できない場合は環境変数から取得
+    if (!accessToken) {
+      accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || null
+    }
+    
     if (!accessToken) {
       return {
         success: false,
@@ -65,6 +77,7 @@ export async function pushMessage(
     }
   }
 }
+
 
 
 

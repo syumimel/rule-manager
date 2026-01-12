@@ -15,11 +15,11 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { channel_id, channel_secret } = body
+    const { channel_id, channel_secret, channel_access_token } = body
 
-    if (!channel_id || !channel_secret) {
+    if (!channel_id || !channel_secret || !channel_access_token) {
       return NextResponse.json(
-        { error: 'Channel IDとChannel Secretが必要です' },
+        { error: 'Channel ID、Channel Secret、Channel Access Tokenが必要です' },
         { status: 400 }
       )
     }
@@ -27,9 +27,16 @@ export async function POST(request: NextRequest) {
     // 既存の設定をチェック
     const { data: existing } = await supabase
       .from('line_settings')
-      .select('id')
+      .select('id, webhook_id')
       .eq('fortune_teller_id', user.id)
       .single()
+
+    // webhook_idが存在しない場合は生成
+    let webhookId = existing?.webhook_id
+    if (!webhookId) {
+      // UUIDを生成（crypto.randomUUID()を使用）
+      webhookId = crypto.randomUUID()
+    }
 
     if (existing) {
       // 更新
@@ -38,6 +45,8 @@ export async function POST(request: NextRequest) {
         .update({
           channel_id,
           channel_secret,
+          channel_access_token,
+          webhook_id: webhookId,
           updated_at: new Date().toISOString(),
         })
         .eq('id', existing.id)
@@ -49,6 +58,11 @@ export async function POST(request: NextRequest) {
         )
       }
     } else {
+      // webhook_idを生成（新規作成時）
+      if (!webhookId) {
+        webhookId = crypto.randomUUID()
+      }
+      
       // 新規作成
       const { error } = await supabase
         .from('line_settings')
@@ -56,6 +70,8 @@ export async function POST(request: NextRequest) {
           fortune_teller_id: user.id,
           channel_id,
           channel_secret,
+          channel_access_token,
+          webhook_id: webhookId,
         })
 
       if (error) {
@@ -66,7 +82,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true })
+    // 更新後のwebhook_idを返す
+    const { data: updatedSettings } = await supabase
+      .from('line_settings')
+      .select('webhook_id')
+      .eq('fortune_teller_id', user.id)
+      .single()
+
+    return NextResponse.json({ 
+      success: true,
+      webhook_id: updatedSettings?.webhook_id 
+    })
   } catch (error: any) {
     console.error('LINE設定保存エラー:', error)
     return NextResponse.json(

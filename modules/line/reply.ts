@@ -186,16 +186,18 @@ export async function getChannelAccessToken(
 ): Promise<string | null> {
   const supabase = await createClient()
 
-  // LINE設定からChannel Secretを取得（実際の実装では、Channel Access Tokenを取得する必要がある）
-  // ここでは簡易版として、Channel Secretを返す
+  // LINE設定からChannel Access Tokenを取得
   const { data: lineSettings } = await supabase
     .from('line_settings')
-    .select('channel_secret')
+    .select('channel_access_token')
     .eq('fortune_teller_id', fortuneTellerId)
     .single()
 
-  // 実際の実装では、Channel Access Tokenを取得するAPIを呼び出す必要がある
-  // ここでは簡易版として、環境変数から取得
+  if (lineSettings?.channel_access_token) {
+    return lineSettings.channel_access_token
+  }
+
+  // フォールバック: 環境変数から取得
   return process.env.LINE_CHANNEL_ACCESS_TOKEN || null
 }
 

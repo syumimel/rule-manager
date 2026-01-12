@@ -51,3 +51,4 @@ CREATE TRIGGER update_auto_replies_updated_at BEFORE UPDATE ON public.auto_repli
 
 
 
+

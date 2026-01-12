@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { pushMessage } from '@/lib/chat/line-push'
-import { saveSentMessage } from '@/lib/chat/message-log'
+import { saveMessageLog } from '@/lib/chat/message-log'
+import { createClient } from '@/lib/supabase/server'
 
 /**
  * メッセージ送信API
@@ -8,6 +9,17 @@ import { saveSentMessage } from '@/lib/chat/message-log'
  */
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createClient()
+    
+    // 認証チェック
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
+    }
+
     const body = await request.json()
     const { userId, messageText } = body
 
@@ -25,31 +37,43 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // LINE APIでメッセージを送信
-    const result = await pushMessage(userId, messageText)
+    // LINE APIでメッセージを送信（fortune_teller_idを渡す）
+    const result = await pushMessage(userId, messageText, user.id)
 
     if (result.success) {
       // 送信成功: ログを保存
-      await saveSentMessage(userId, messageText, {
-        type: 'push',
-        to: userId,
-        messages: [
-          {
-            type: 'text',
-            text: messageText,
-          },
-        ],
-      } as any)
+      await saveMessageLog({
+        lineUserId: userId,
+        messageType: 'sent',
+        messageText,
+        rawEventData: {
+          type: 'push',
+          to: userId,
+          messages: [
+            {
+              type: 'text',
+              text: messageText,
+            },
+          ],
+        },
+        fortuneTellerId: user.id,
+      })
 
       return NextResponse.json({ success: true })
     } else {
       // 送信失敗: エラーログを保存
-      await saveSentMessage(userId, messageText, {
-        type: 'push',
-        to: userId,
-        error: result.error,
-        statusCode: result.statusCode,
-      } as any)
+      await saveMessageLog({
+        lineUserId: userId,
+        messageType: 'sent',
+        messageText,
+        rawEventData: {
+          type: 'push',
+          to: userId,
+          error: result.error,
+          statusCode: result.statusCode,
+        },
+        fortuneTellerId: user.id,
+      })
 
       return NextResponse.json(
         {
@@ -71,6 +95,7 @@ export async function POST(request: NextRequest) {
     )
   }
 }
+
 
 
 

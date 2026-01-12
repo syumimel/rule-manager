@@ -96,8 +96,8 @@ export async function POST(request: NextRequest) {
 
     console.log('画像アップロード開始 - ユーザーID:', user.id)
     
-    // ユーザープロファイルの存在確認
-    const { data: profile, error: profileError } = await supabase
+    // ユーザープロファイルの存在確認（存在しない場合は自動作成）
+    const { data: profile, error: profileError } = await adminClient
       .from('user_profiles')
       .select('id, role')
       .eq('id', user.id)
@@ -105,12 +105,35 @@ export async function POST(request: NextRequest) {
 
     console.log('ユーザープロファイル確認結果:', { profile, profileError })
 
-    if (profileError || !profile) {
-      console.error('ユーザープロファイルが見つかりません:', profileError)
+    if (profileError && profileError.code === 'PGRST116') {
+      // ユーザープロファイルが存在しない場合は自動作成
+      console.log('ユーザープロファイルが存在しないため、自動作成します')
+      const { data: newProfile, error: createError } = await adminClient
+        .from('user_profiles')
+        .insert({
+          id: user.id,
+          email: user.email || null,
+          role: 'fortune_teller',
+        })
+        .select()
+        .single()
+
+      if (createError) {
+        console.error('ユーザープロファイルの作成に失敗しました:', createError)
+        // アップロードしたファイルを削除
+        await adminClient.storage.from('fortune-images').remove([filePath])
+        return NextResponse.json(
+          { error: `ユーザープロファイルの作成に失敗しました: ${createError.message}` },
+          { status: 500 }
+        )
+      }
+      console.log('ユーザープロファイルを作成しました:', newProfile)
+    } else if (profileError) {
+      console.error('ユーザープロファイル確認エラー:', profileError)
       // アップロードしたファイルを削除
       await adminClient.storage.from('fortune-images').remove([filePath])
       return NextResponse.json(
-        { error: 'ユーザープロファイルが見つかりません。管理者に連絡してください。' },
+        { error: `ユーザープロファイルの確認に失敗しました: ${profileError.message}` },
         { status: 500 }
       )
     }

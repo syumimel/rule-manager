@@ -27,9 +27,11 @@ export async function GET(request: NextRequest) {
     }
 
     // メッセージログから各LINEユーザーIDごとの最新メッセージを取得
+    // ログインしているユーザーのメッセージのみ取得
     const { data, error } = await supabase
       .from('message_logs')
       .select('line_user_id, created_at, message_text, message_type')
+      .eq('fortune_teller_id', user.id)
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -68,6 +70,7 @@ export async function GET(request: NextRequest) {
     )
   }
 }
+
 
 
 

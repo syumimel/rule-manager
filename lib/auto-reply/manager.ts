@@ -166,6 +166,8 @@ export async function findMatchingAutoReply(
 ): Promise<AutoReply | null> {
   const adminClient = createAdminClient()
 
+  console.log('[AutoReply] Searching for auto reply:', { fortuneTellerId, messageText })
+
   // 有効な自動返信を優先順位順に取得
   const { data, error } = await adminClient
     .from('auto_replies')
@@ -176,11 +178,14 @@ export async function findMatchingAutoReply(
     .order('created_at', { ascending: false })
 
   if (error) {
-    console.error('Failed to get auto replies:', error)
+    console.error('[AutoReply] Failed to get auto replies:', error)
     return null
   }
 
+  console.log('[AutoReply] Found', data?.length || 0, 'active auto replies')
+
   if (!data || data.length === 0) {
+    console.log('[AutoReply] No active auto replies found')
     return null
   }
 
@@ -206,11 +211,20 @@ export async function findMatchingAutoReply(
         break
     }
 
+    console.log('[AutoReply] Checking:', {
+      keyword: autoReply.keyword,
+      match_type: autoReply.match_type,
+      isMatch,
+      message: messageText.substring(0, 50),
+    })
+
     if (isMatch) {
+      console.log('[AutoReply] Match found!', autoReply.id)
       return autoReply as AutoReply
     }
   }
 
+  console.log('[AutoReply] No matching auto reply found')
   return null
 }
 

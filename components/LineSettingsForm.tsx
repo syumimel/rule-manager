@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation'
 interface LineSettings {
   channel_id?: string
   channel_secret?: string
+  channel_access_token?: string
+  webhook_id?: string
 }
 
 interface LineSettingsFormProps {
@@ -15,6 +17,8 @@ interface LineSettingsFormProps {
 export default function LineSettingsForm({ initialSettings }: LineSettingsFormProps) {
   const [channelId, setChannelId] = useState(initialSettings?.channel_id || '')
   const [channelSecret, setChannelSecret] = useState(initialSettings?.channel_secret || '')
+  const [channelAccessToken, setChannelAccessToken] = useState(initialSettings?.channel_access_token || '')
+  const [webhookId, setWebhookId] = useState(initialSettings?.webhook_id || '')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<{ success: boolean; error?: string } | null>(null)
   const router = useRouter()
@@ -32,6 +36,11 @@ export default function LineSettingsForm({ initialSettings }: LineSettingsFormPr
       return
     }
 
+    if (!channelAccessToken.trim()) {
+      setResult({ success: false, error: 'Channel Access Tokenを入力してください' })
+      return
+    }
+
     setLoading(true)
     setResult(null)
 
@@ -44,12 +53,17 @@ export default function LineSettingsForm({ initialSettings }: LineSettingsFormPr
         body: JSON.stringify({
           channel_id: channelId,
           channel_secret: channelSecret,
+          channel_access_token: channelAccessToken,
         }),
       })
 
       const data = await response.json()
 
       if (response.ok && data.success) {
+        // webhook_idを更新
+        if (data.webhook_id) {
+          setWebhookId(data.webhook_id)
+        }
         setResult({ success: true })
         router.refresh()
       } else {
@@ -107,14 +121,37 @@ export default function LineSettingsForm({ initialSettings }: LineSettingsFormPr
           </p>
         </div>
 
+        <div>
+          <label htmlFor="channel-access-token" className="block text-sm font-medium text-gray-700 mb-1">
+            Channel Access Token <span className="text-red-500">*</span>
+          </label>
+          <input
+            id="channel-access-token"
+            type="password"
+            value={channelAccessToken}
+            onChange={(e) => setChannelAccessToken(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            required
+          />
+          <p className="mt-1 text-sm text-gray-500">
+            LINE Developers Consoleで取得したChannel Access Tokenを入力してください
+          </p>
+        </div>
+
         <div className="bg-blue-50 border border-blue-200 p-4 rounded">
           <p className="text-sm text-blue-800">
             <strong>Webhook URL:</strong><br />
-            <code className="text-xs">
-              {typeof window !== 'undefined' 
-                ? `${window.location.origin}/api/line/webhook`
-                : 'https://your-domain.com/api/line/webhook'}
-            </code>
+            {webhookId || initialSettings?.webhook_id ? (
+              <code className="text-xs break-all">
+                {typeof window !== 'undefined' 
+                  ? `${window.location.origin}/api/line/webhook/${webhookId || initialSettings?.webhook_id}`
+                  : `https://your-domain.com/api/line/webhook/${webhookId || initialSettings?.webhook_id}`}
+              </code>
+            ) : (
+              <span className="text-xs text-gray-500">
+                設定を保存するとWebhook URLが生成されます
+              </span>
+            )}
           </p>
           <p className="text-xs text-blue-600 mt-2">
             このURLをLINE Developers ConsoleのWebhook URLに設定してください

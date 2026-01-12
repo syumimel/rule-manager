@@ -52,3 +52,4 @@ CREATE TRIGGER update_imagemaps_updated_at BEFORE UPDATE ON public.imagemaps
 
 
 
+

@@ -21,10 +21,11 @@ export default async function LogsPage({
   const offset = (page - 1) * limit
 
   // message_logsテーブルから送信/受信メッセージを取得
-  // 占い師が管理しているLINEユーザーのログを取得
+  // ログインしているユーザーのメッセージのみ取得
   const { data: logs, error, count } = await supabase
     .from('message_logs')
     .select('*', { count: 'exact' })
+    .eq('fortune_teller_id', user.id)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1)
 

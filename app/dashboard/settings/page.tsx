@@ -15,7 +15,7 @@ export default async function SettingsPage() {
   // LINE設定を取得
   const { data: lineSettings } = await supabase
     .from('line_settings')
-    .select('channel_id, channel_secret')
+    .select('channel_id, channel_secret, channel_access_token, webhook_id')
     .eq('fortune_teller_id', user.id)
     .single()
 

@@ -10,6 +10,7 @@ export interface MessageLogInput {
   replyToken?: string
   messageId?: string
   formattedPayload?: Record<string, any>
+  fortuneTellerId?: string
 }
 
 export interface MessageLog {
@@ -57,6 +58,17 @@ export async function saveMessageLog(
 ): Promise<MessageLog> {
   const supabase = await createClient()
 
+  // fortune_teller_idが指定されていない場合は、現在のユーザーIDを取得
+  let fortuneTellerId = input.fortuneTellerId
+  if (!fortuneTellerId) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (user) {
+      fortuneTellerId = user.id
+    }
+  }
+
   // 重複チェック
   if (input.messageId) {
     const isDuplicate = await checkDuplicateMessageId(input.messageId)
@@ -75,6 +87,7 @@ export async function saveMessageLog(
       reply_token: input.replyToken || null,
       message_id: input.messageId || null,
       formatted_payload: input.formattedPayload || null,
+      fortune_teller_id: fortuneTellerId || null,
     })
     .select()
     .single()
@@ -145,6 +158,7 @@ export async function getMessageLogsByUser(
 
   return (data || []) as MessageLog[]
 }
+
 
 
 

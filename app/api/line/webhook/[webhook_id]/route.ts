@@ -8,32 +8,48 @@ import { saveReceivedMessage, saveSentMessage } from '@/lib/chat/message-log'
 import { findMatchingAutoReply } from '@/lib/auto-reply/manager'
 import { processILEMessages } from '@/lib/ile/engine'
 
-export async function POST(request: NextRequest) {
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { webhook_id: string } }
+) {
   try {
     const body = await request.text()
     const signature = request.headers.get('x-line-signature') || ''
+    const webhookId = params.webhook_id
 
-    // 環境変数からChannel Secretを取得（実際の実装では、ユーザーごとに取得）
-    const channelSecret = process.env.LINE_CHANNEL_SECRET || ''
+    // Webhook IDからLINE設定を取得
+    const adminClient = createAdminClient()
+    console.log('[Webhook] Looking up webhook_id:', webhookId)
+    const { data: lineSetting, error: settingError } = await adminClient
+      .from('line_settings')
+      .select('fortune_teller_id, channel_secret')
+      .eq('webhook_id', webhookId)
+      .single()
 
-    if (!channelSecret) {
-      console.error('LINE_CHANNEL_SECRETが設定されていません')
-      return NextResponse.json({ error: '設定エラー' }, { status: 500 })
+    if (settingError || !lineSetting) {
+      console.error('[Webhook] Webhook IDが見つかりません:', webhookId, settingError)
+      return NextResponse.json({ error: 'Webhook IDが見つかりません' }, { status: 404 })
     }
 
+    console.log('[Webhook] Found line setting for fortune_teller_id:', lineSetting.fortune_teller_id)
+
     // 署名検証
-    if (!verifyLineSignature(body, signature, channelSecret)) {
-      console.error('署名検証に失敗しました')
+    if (!verifyLineSignature(body, signature, lineSetting.channel_secret)) {
+      console.error('[Webhook] 署名検証に失敗しました')
       return NextResponse.json({ error: '署名検証失敗' }, { status: 401 })
     }
 
+    console.log('[Webhook] Signature verified successfully')
+
     const webhookData: LineWebhookRequest = JSON.parse(body)
+    console.log('[Webhook] Received', webhookData.events?.length || 0, 'events')
 
     // イベントを処理
     for (const event of webhookData.events) {
       // メッセージイベントのみ処理
       if (event.type === 'message' && event.message?.type === 'text') {
-        await handleMessageEvent(event)
+        console.log('[Webhook] Processing message event:', event.message?.text?.substring(0, 50))
+        await handleMessageEvent(event, lineSetting.fortune_teller_id, adminClient)
       }
     }
 
@@ -47,9 +63,12 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function handleMessageEvent(event: any) {
+async function handleMessageEvent(
+  event: any,
+  fortuneTellerId: string,
+  adminClient: any
+) {
   const supabase = await createClient()
-  const adminClient = createAdminClient()
   const userId = event.source.userId
   const messageText = event.message?.text || ''
   const replyToken = event.replyToken
@@ -85,6 +104,7 @@ async function handleMessageEvent(event: any) {
             raw_event_data: event,
             reply_token: replyToken || null,
             message_id: messageId || null,
+            fortune_teller_id: fortuneTellerId,
           })
         
         if (insertError) {
@@ -102,6 +122,7 @@ async function handleMessageEvent(event: any) {
           raw_event_data: event,
           reply_token: replyToken || null,
           message_id: null,
+          fortune_teller_id: fortuneTellerId,
         })
       
       if (insertError) {
@@ -120,11 +141,11 @@ async function handleMessageEvent(event: any) {
     replyContent: null,
   })
 
-  // 占い師IDを取得（LINE設定から、またはデフォルト）
-  const fortuneTellerId = await getFortuneTellerId(adminClient)
-  
   // オウム返し設定を確認（adminClientを使用してRLSをバイパス）
   if (fortuneTellerId) {
+    console.log('[Webhook] Processing message for fortune_teller_id:', fortuneTellerId)
+    console.log('[Webhook] Message text:', messageText)
+    
     // adminClientを使って直接chat_settingsを確認
     const { data: chatSettings, error: settingsError } = await adminClient
       .from('chat_settings')
@@ -134,8 +155,22 @@ async function handleMessageEvent(event: any) {
       .single()
     
     const echoEnabled = chatSettings?.echo_enabled || false
+    console.log('[Webhook] Echo enabled:', echoEnabled)
     
     if (echoEnabled) {
+      // Channel Access Tokenを取得（adminClientを使用）
+      const { data: lineSettingForToken } = await adminClient
+        .from('line_settings')
+        .select('channel_access_token')
+        .eq('fortune_teller_id', fortuneTellerId)
+        .single()
+      
+      const accessToken = lineSettingForToken?.channel_access_token || ''
+      
+      if (!accessToken) {
+        console.error('[Webhook] Channel Access Token not found for echo reply')
+      }
+      
       // オウム返しを実行
       const echoResult = await sendReplyMessage(
         replyToken,
@@ -145,7 +180,7 @@ async function handleMessageEvent(event: any) {
             text: messageText,
           },
         ],
-        process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
+        accessToken
       )
       
       // 送信ログを保存（オウム返し、エラー時も保存）
@@ -168,6 +203,7 @@ async function handleMessageEvent(event: any) {
               replyToken,
               messages: [{ type: 'text', text: messageText }],
             } : null,
+            fortune_teller_id: fortuneTellerId,
           })
         
         if (insertError) {
@@ -181,9 +217,26 @@ async function handleMessageEvent(event: any) {
     }
 
     // 自動返信をチェック
+    console.log('[Webhook] Checking for auto reply...')
     const autoReply = await findMatchingAutoReply(fortuneTellerId, messageText)
+    console.log('[Webhook] Auto reply result:', autoReply ? `Found: ${autoReply.keyword} (${autoReply.match_type})` : 'Not found')
     
     if (autoReply) {
+      console.log('[Webhook] Executing auto reply:', autoReply.id)
+      // Channel Access Tokenを取得（adminClientを使用）
+      const { data: lineSettingForToken } = await adminClient
+        .from('line_settings')
+        .select('channel_access_token')
+        .eq('fortune_teller_id', fortuneTellerId)
+        .single()
+      
+      const accessToken = lineSettingForToken?.channel_access_token || ''
+      console.log('[Webhook] Access token retrieved:', accessToken ? 'Yes (length: ' + accessToken.length + ')' : 'No')
+      
+      if (!accessToken) {
+        console.error('[Webhook] Channel Access Token not found for fortune_teller_id:', fortuneTellerId)
+      }
+      
       // 自動返信を実行
       if (autoReply.reply_type === 'text' && autoReply.reply_text) {
         // テキスト返信
@@ -195,7 +248,7 @@ async function handleMessageEvent(event: any) {
               text: autoReply.reply_text,
             },
           ],
-          process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
+          accessToken
         )
 
         // 送信ログを保存（エラー時も保存）
@@ -204,6 +257,7 @@ async function handleMessageEvent(event: any) {
             line_user_id: userId,
             message_type: 'sent',
             message_text: autoReply.reply_text,
+            fortune_teller_id: fortuneTellerId,
             raw_event_data: {
               type: 'auto_reply',
               auto_reply_id: autoReply.id,
@@ -240,7 +294,7 @@ async function handleMessageEvent(event: any) {
         const jsonResult = await sendReplyMessage(
           replyToken,
           processedMessages,
-          process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
+          accessToken
         )
 
         // 送信ログを保存（エラー時も保存）
@@ -254,6 +308,7 @@ async function handleMessageEvent(event: any) {
             line_user_id: userId,
             message_type: 'sent',
             message_text: replyText || '(JSONメッセージ)',
+            fortune_teller_id: fortuneTellerId,
             raw_event_data: {
               type: 'auto_reply',
               auto_reply_id: autoReply.id,
@@ -285,6 +340,15 @@ async function handleMessageEvent(event: any) {
     const defaultFortuneTypeId = 'numerology'
     const defaultRuleGenerationId = await getDefaultRuleGenerationId(supabase)
 
+    // Channel Access Tokenを取得（adminClientを使用）
+    const { data: lineSettingForToken } = await adminClient
+      .from('line_settings')
+      .select('channel_access_token')
+      .eq('fortune_teller_id', fortuneTellerId)
+      .single()
+    
+    const accessTokenForFortune = lineSettingForToken?.channel_access_token || ''
+
     if (!defaultRuleGenerationId) {
       const noRuleResult = await sendReplyMessage(
         replyToken,
@@ -294,7 +358,7 @@ async function handleMessageEvent(event: any) {
             text: '占いルールが設定されていません。管理画面でルールをアップロードしてください。',
           },
         ],
-        process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
+        accessTokenForFortune
       )
       
       // エラーログを保存
@@ -303,6 +367,7 @@ async function handleMessageEvent(event: any) {
           line_user_id: userId,
           message_type: 'sent',
           message_text: '占いルールが設定されていません。管理画面でルールをアップロードしてください。',
+          fortune_teller_id: fortuneTellerId,
           raw_event_data: {
             type: 'fortune_no_rule',
             success: noRuleResult.success,
@@ -333,7 +398,7 @@ async function handleMessageEvent(event: any) {
             text: '生年月日を入力してください。\n形式: YYYYMMDD（例: 19900101）',
           },
         ],
-        process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
+        accessTokenForFortune
       )
       
       // エラーログを保存
@@ -342,6 +407,7 @@ async function handleMessageEvent(event: any) {
           line_user_id: userId,
           message_type: 'sent',
           message_text: '生年月日を入力してください。\n形式: YYYYMMDD（例: 19900101）',
+          fortune_teller_id: fortuneTellerId,
           raw_event_data: {
             type: 'fortune_no_birthdate',
             success: noBirthDateResult.success,
@@ -372,7 +438,7 @@ async function handleMessageEvent(event: any) {
       const replyResult = await sendReplyMessage(
         replyToken,
         fortuneResult.messages,
-        process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
+        accessTokenForFortune
       )
 
       // メッセージログに保存（送信、エラー時も保存）
@@ -389,6 +455,7 @@ async function handleMessageEvent(event: any) {
             line_user_id: userId,
             message_type: 'sent',
             message_text: replyText || '(JSONメッセージ)',
+            fortune_teller_id: fortuneTellerId,
             raw_event_data: {
               type: 'fortune',
               messages: fortuneResult.messages,
@@ -429,7 +496,7 @@ async function handleMessageEvent(event: any) {
             text: fortuneResult.error || '占いの実行に失敗しました',
           },
         ],
-        process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
+        accessTokenForFortune
       )
 
       // エラーメッセージ送信ログを保存
@@ -438,6 +505,7 @@ async function handleMessageEvent(event: any) {
           line_user_id: userId,
           message_type: 'sent',
           message_text: fortuneResult.error || '占いの実行に失敗しました',
+          fortune_teller_id: fortuneTellerId,
           raw_event_data: {
             type: 'fortune_error',
             fortuneType: defaultFortuneTypeId,
@@ -458,6 +526,15 @@ async function handleMessageEvent(event: any) {
     // その他のメッセージにはデフォルト返信
     const defaultReplyText = '占いを開始するには「占い YYYYMMDD」と入力してください。\n例: 占い 19900101'
     
+    // Channel Access Tokenを取得（adminClientを使用）
+    const { data: lineSettingForToken } = await adminClient
+      .from('line_settings')
+      .select('channel_access_token')
+      .eq('fortune_teller_id', fortuneTellerId)
+      .single()
+    
+    const accessTokenForDefault = lineSettingForToken?.channel_access_token || ''
+    
     const defaultResult = await sendReplyMessage(
       replyToken,
       [
@@ -466,7 +543,7 @@ async function handleMessageEvent(event: any) {
           text: defaultReplyText,
         },
       ],
-      process.env.LINE_CHANNEL_ACCESS_TOKEN || ''
+      accessTokenForDefault
     )
     
     // 送信ログを保存（エラー時も保存）
@@ -477,6 +554,7 @@ async function handleMessageEvent(event: any) {
           line_user_id: userId,
           message_type: 'sent',
           message_text: defaultReplyText,
+          fortune_teller_id: fortuneTellerId,
           raw_event_data: {
             type: 'default_reply',
             success: defaultResult.success,
@@ -509,44 +587,4 @@ async function getDefaultRuleGenerationId(supabase: any): Promise<string | null>
 
   return generation?.id || null
 }
-
-async function getFortuneTellerId(adminClient: any): Promise<string | null> {
-  try {
-    // LINE設定から最初の占い師IDを取得（簡易版）
-    // 実際の実装では、LINE設定から複数の占い師を管理する必要がある場合がある
-    const { data: settings, error } = await adminClient
-      .from('line_settings')
-      .select('fortune_teller_id')
-      .limit(1)
-      .maybeSingle()
-
-    if (error && error.code !== 'PGRST116') {
-      console.error('Failed to get fortune teller ID:', error)
-      return null
-    }
-
-    if (settings) {
-      return settings.fortune_teller_id
-    }
-
-    // line_settingsにデータがない場合、user_profilesから最初の占い師IDを取得
-    const { data: userProfile, error: profileError } = await adminClient
-      .from('user_profiles')
-      .select('id')
-      .limit(1)
-      .maybeSingle()
-
-    if (profileError && profileError.code !== 'PGRST116') {
-      console.error('Failed to get user profile:', profileError)
-      return null
-    }
-
-    return userProfile?.id || null
-  } catch (error) {
-    console.error('Failed to get fortune teller ID:', error)
-    return null
-  }
-}
-
-
 

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { createClient } from '@/lib/supabase/server'
+import { getChannelAccessToken } from '@/modules/line/reply'
 
 /**
  * JSONメッセージ送信API
@@ -49,7 +51,23 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN
+    // 認証されたユーザーからfortune_teller_idを取得
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    let accessToken: string | null = null
+    if (user) {
+      // データベースからChannel Access Tokenを取得
+      accessToken = await getChannelAccessToken(user.id)
+    }
+    
+    // データベースから取得できない場合は環境変数から取得
+    if (!accessToken) {
+      accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || null
+    }
+    
     if (!accessToken) {
       return NextResponse.json(
         { error: 'LINE_CHANNEL_ACCESS_TOKEN is not set' },
@@ -151,6 +169,7 @@ export async function POST(request: NextRequest) {
     )
   }
 }
+
 
 
 
